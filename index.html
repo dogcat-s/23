@@ -28,7 +28,7 @@
       <div style="margin-top:6px">Time: <span id="time">0</span>s &nbsp; Targets: <span id="targets">0</span></div>
     </div>
     <div class="controls">Move: W/A/S/D &nbsp; Shoot: Space or Click</div>
-    <div class="center-msg"><div id="start-panel" class="panel"><div style="font-size:18px;font-weight:800">MAZE TARGET PRACTICE</div><div style="margin-top:8px;font-size:12px">Move with WASD. Aim with mouse. Shoot targets before time runs out.</div><div style="margin-top:12px"><button id="startBtn">Start Round</button></div></div></div>
+    <div class="center-msg"><div id="start-panel" class="panel"><div style="font-size:18px;font-weight:800">MAZE TARGET PRACTICE</div><div style="margin-top:8px;font-size:12px">Move with WASD. Face a direction and press Space or Click to shoot. Clear all targets before time runs out.</div><div style="margin-top:12px"><button id="startBtn">Start Round</button></div></div></div>
     <div class="footer">Top-down maze view • Side gun shown</div>
   </div>
 
@@ -52,10 +52,10 @@
     function resize(){ const r = wrap.getBoundingClientRect(); W = Math.floor(r.width); H = Math.floor(r.height); canvas.width = W * devicePixelRatio; canvas.height = H * devicePixelRatio; canvas.style.width = W+'px'; canvas.style.height = H+'px'; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
     window.addEventListener('resize', resize); resize();
 
-    // room tiles (pokemon-like)
-    const tile = 16; // tile size
-    const cols = Math.floor(VW / tile); // 20
-    const rows = Math.floor(VH / tile); // 12
+    // room tiles (pokemon-like) — smaller tiles to make room larger
+    const tile = 12; // tile size (smaller -> larger room)
+    const cols = Math.floor(VW / tile);
+    const rows = Math.floor(VH / tile);
     let map = [];
 
     function makeRoom(){
@@ -67,44 +67,45 @@
       for(let i=0;i<14;i++){ const rx = 2 + Math.floor(Math.random()*(cols-4)); const ry = 2 + Math.floor(Math.random()*(rows-4)); map[ry][rx]=1; }
     }
 
-    // player sprite (16x16 pixel art) drawn programmatically
-    function drawPlayerSprite(ctx,x,y,flip=false){
-      // simple Pokemon-like trainer: red hat, orange face, blue clothes
-      const px = x, py = y; // top-left of 16x16
+    // player sprite (pixel art) drawn programmatically, sized by `s`
+    function drawPlayerSprite(ctx,x,y,s){
+      const px = x, py = y; // top-left of s x s
       const p = ctx;
-      p.fillStyle = '#c33'; p.fillRect(px+4,py+0,8,4); // hat
-      p.fillStyle = '#811'; p.fillRect(px+6,py+1,4,2);
-      p.fillStyle = '#f4c27d'; p.fillRect(px+5,py+4,6,4); // face
-      p.fillStyle = '#224'; p.fillRect(px+4,py+8,8,6); // body
+      const unit = Math.max(1, Math.floor(s/8));
+      // hat
+      p.fillStyle = '#c33'; p.fillRect(px + unit*2, py + 0, unit*4, unit*2);
+      p.fillStyle = '#811'; p.fillRect(px + unit*3, py + unit*0.5, unit*2, unit*1);
+      // face
+      p.fillStyle = '#f4c27d'; p.fillRect(px + unit*1, py + unit*2, unit*6, unit*3);
+      // body
+      p.fillStyle = '#224'; p.fillRect(px + unit*1, py + unit*5, unit*6, unit*3);
       // gun in hand (pixel)
-      p.fillStyle = '#222'; p.fillRect(px+10,py+8,4,2); p.fillStyle='#666'; p.fillRect(px+12,py+7,2,2);
+      p.fillStyle = '#222'; p.fillRect(px + unit*5, py + unit*5, unit*3, unit*1);
+      p.fillStyle = '#666'; p.fillRect(px + unit*7, py + unit*4, unit*1, unit*2);
     }
 
-    function drawTargetSprite(ctx,x,y){ ctx.fillStyle='#ff6b6b'; ctx.fillRect(x,y,12,12); ctx.fillStyle='#111'; ctx.fillRect(x+4,y+4,4,4); }
+    function drawTargetSprite(ctx,x,y){ ctx.fillStyle='#ff6b6b'; ctx.fillRect(x,y,10,10); ctx.fillStyle='#111'; ctx.fillRect(x+3,y+3,4,4); }
 
-    const player = { x: VW/2, y: VH/2, w:12, h:16, speed: 80 };
+    const player = { x: VW/2, y: VH/2, w:12, h:12, speed: 80, dir: 'down' };
     let keys = {};
-    let mouse = {x:VW/2,y:VH/2};
     let bullets = [];
     let targets = [];
     let score = 0, timeLeft = 0, running=false, lastTime=0;
 
-    function placeTargets(n){ targets = []; const free=[]; for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(map[y][x]===0) free.push({x,y}); for(let i=0;i<n && free.length;i++){ const idx=Math.floor(Math.random()*free.length); const p = free.splice(idx,1)[0]; targets.push({ x: p.x*tile + tile/2 -6, y: p.y*tile + tile/2 -6, w:12, h:12 }); } }
+    function placeTargets(n){ targets = []; const free=[]; for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(map[y][x]===0) free.push({x,y}); for(let i=0;i<n && free.length;i++){ const idx=Math.floor(Math.random()*free.length); const p = free.splice(idx,1)[0]; targets.push({ x: p.x*tile + tile/2 -5, y: p.y*tile + tile/2 -5, w:10, h:10, ox: Math.random()*1000 }); } }
 
-    function worldToScreen(wx,wy){ return { x: Math.round(VW/2 + (wx - player.x)), y: Math.round(VH/2 + (wy - player.y)) }; }
-    function screenToWorld(sx,sy){ return { x: player.x + (sx - VW/2), y: player.y + (sy - VH/2) }; }
+    const MAP_W = cols * tile, MAP_H = rows * tile;
 
     function canMove(nx,ny){ // check collision with tiles (player center)
       const cx = Math.floor(nx / tile), cy = Math.floor(ny / tile);
       if(cx<0||cx>=cols||cy<0||cy>=rows) return false; return map[cy][cx]===0;
     }
 
-    function fireBullet(twx,twy){ const ax = twx - player.x, ay = twy - player.y; const len = Math.hypot(ax,ay); if(len===0) return; const vx = (ax/len)*220, vy = (ay/len)*220; bullets.push({x:player.x,y:player.y,vx,vy,r:3}); }
+    function fireBulletDir(dir){ let vx=0,vy=0,speed=220; if(dir==='up') vy = -speed; else if(dir==='down') vy = speed; else if(dir==='left') vx = -speed; else if(dir==='right') vx = speed; bullets.push({x:player.x,y:player.y,vx,vy,r:3}); }
 
-    window.addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space'){ e.preventDefault(); const tw = screenToWorld(mouse.x,mouse.y); fireBullet(tw.x, tw.y); } });
+    window.addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space'){ e.preventDefault(); fireBulletDir(player.dir); } });
     window.addEventListener('keyup', e=>{ keys[e.code]=false; });
-    canvas.addEventListener('mousemove', e=>{ const r = canvas.getBoundingClientRect(); mouse.x = (e.clientX - r.left)/r.width*VW; mouse.y = (e.clientY - r.top)/r.height*VH; });
-    canvas.addEventListener('click', ()=>{ const tw = screenToWorld(mouse.x,mouse.y); fireBullet(tw.x, tw.y); });
+    canvas.addEventListener('click', ()=>{ fireBulletDir(player.dir); });
 
     startBtn.addEventListener('click', ()=>{
       makeRoom(); placeTargets(8);
@@ -126,27 +127,33 @@
     }
 
     function draw(){
+      // simple camera that clamps to map edges so player can move visibly
+      let camX = Math.floor(player.x - VW/2);
+      let camY = Math.floor(player.y - VH/2);
+      camX = Math.max(0, Math.min(camX, MAP_W - VW));
+      camY = Math.max(0, Math.min(camY, MAP_H - VH));
+
       // background
       bctx.fillStyle = '#cbe8f0'; bctx.fillRect(0,0,VW,VH);
       // tiles: floor vs wall with Pokemon palette
       for(let y=0;y<rows;y++){
         for(let x=0;x<cols;x++){
-          const sx = x*tile, sy = y*tile;
+          const sx = x*tile - camX, sy = y*tile - camY;
+          if(sx+tile < 0 || sy+tile < 0 || sx > VW || sy > VH) continue;
           if(map[y][x]===1){ bctx.fillStyle = '#5b6b3a'; bctx.fillRect(sx,sy,tile,tile); bctx.fillStyle='rgba(0,0,0,0.12)'; bctx.fillRect(sx,sy+tile-3,tile,3); }
           else { bctx.fillStyle = '#b4d39a'; bctx.fillRect(sx,sy,tile,tile); }
         }
       }
-      // targets
-      for(const t of targets){ const p = worldToScreen(t.x + t.w/2, t.y + t.h/2); drawTargetSprite(bctx, p.x-6, p.y-6); }
+      // targets (light movement)
+      for(const t of targets){ t.x += Math.sin((performance.now()+t.ox)/700)*0.02; t.y += Math.cos((performance.now()+t.ox)/900)*0.02; const p = { x: Math.round(t.x - camX), y: Math.round(t.y - camY) }; drawTargetSprite(bctx, p.x-5, p.y-5); }
       // bullets
-      for(const b of bullets){ const p = worldToScreen(b.x,b.y); bctx.fillStyle='#ffd86b'; bctx.fillRect(p.x-2,p.y-2,4,4); }
-      // player at center
-      const playerDrawX = Math.floor(VW/2 - player.w/2), playerDrawY = Math.floor(VH/2 - player.h/2);
-      drawPlayerSprite(bctx, playerDrawX, playerDrawY);
+      for(const b of bullets){ const p = { x: Math.round(b.x - camX), y: Math.round(b.y - camY) }; bctx.fillStyle='#ffd86b'; bctx.fillRect(p.x-2,p.y-2,4,4); }
+      // player at world position relative to camera
+      const playerDrawX = Math.floor(player.x - camX - player.w/2), playerDrawY = Math.floor(player.y - camY - player.h/2);
+      if(keys['KeyW']) player.dir = 'up'; else if(keys['KeyS']) player.dir = 'down'; else if(keys['KeyA']) player.dir = 'left'; else if(keys['KeyD']) player.dir = 'right';
+      drawPlayerSprite(bctx, playerDrawX, playerDrawY, Math.max(player.w, player.h));
       // side gun large
       const gx = VW - 68, gy = VH - 64; bctx.fillStyle='#e0b27d'; bctx.fillRect(gx+14, gy+24, 6, 10); bctx.fillStyle='#333'; bctx.fillRect(gx, gy+12, 48, 16); bctx.fillStyle='#666'; bctx.fillRect(gx+6, gy+8, 32, 6);
-      // crosshair
-      bctx.fillStyle='rgba(255,255,255,0.95)'; bctx.fillRect(mouse.x-1, mouse.y-8, 2, 16); bctx.fillRect(mouse.x-8, mouse.y-1, 16, 2);
       // render
       ctx.imageSmoothingEnabled = false; ctx.clearRect(0,0,W,H); ctx.drawImage(buffer,0,0,VW,VH,0,0,W,H);
     }
