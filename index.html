@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>Retro Pixel Shooter</title>
+	<style>
+		:root{--fg:#cfe8ff;--bg1:#07101a;--bg2:#030616}
+		html,body{height:100%;margin:0;font-family:monospace,system-ui,Segoe UI,Roboto,Arial}
+		body{background:linear-gradient(180deg,var(--bg1),var(--bg2));display:flex;align-items:center;justify-content:center;color:var(--fg)}
+		#game-wrap{position:relative;width:960px;max-width:96vw;height:640px;background:#021025 box-shadow:0 8px 30px rgba(0,0,0,.7);border-radius:8px;overflow:hidden}
+		canvas{display:block;width:100%;height:100%;image-rendering:pixelated}
+		.hud{position:absolute;left:8px;top:8px;font-weight:700;letter-spacing:.6px;font-size:14px}
+		.hud .score{font-size:14px}
+		.hud .info{font-size:12px;opacity:.95;margin-top:6px}
+		.center-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+		.panel{pointer-events:auto;background:rgba(0,0,0,0.65);padding:10px 14px;border-radius:6px;color:var(--fg);text-align:center;border:2px solid rgba(255,255,255,0.03)}
+		.controls{position:absolute;right:8px;top:8px;font-size:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.06));padding:6px 8px;border-radius:6px}
+		.footer{position:absolute;left:0;right:0;bottom:6px;text-align:center;color:rgba(255,255,255,.4);font-size:11px}
+		.scanlines{position:absolute;inset:0;pointer-events:none;background-image:repeating-linear-gradient(transparent, rgba(0,0,0,0.06) 1px);mix-blend-mode:overlay}
+		@media (max-width:640px){#game-wrap{height:56vw}}
+	</style>
+</head>
+<body>
+	<div id="game-wrap">
+		<canvas id="c"></canvas>
+		<div class="scanlines"></div>
+		<div class="hud">
+			<div class="score">Score: <span id="score">0</span></div>
+			<div class="info">Lives: <span id="lives">3</span></div>
+		</div>
+		<div class="controls">Move: A / D or ← → &nbsp; Shoot: Space</div>
+		<div class="center-msg"><div id="start-panel" class="panel"><div style="font-size:16px;font-weight:800">RETRO PIXEL SHOOTER</div><div style="margin-top:8px;font-size:12px">Use left/right and Space to shoot. Destroy sprites before they reach you.</div><div style="margin-top:10px"><button id="startBtn">Start Game</button></div></div></div>
+		<div class="footer">Nearest-neighbor scaling + scanlines</div>
+	</div>
+
+	<script>
+	(function(){
+		const canvas = document.getElementById('c');
+		const ctx = canvas.getContext('2d');
+		const wrap = document.getElementById('game-wrap');
+		const scoreEl = document.getElementById('score');
+		const livesEl = document.getElementById('lives');
+		const startPanel = document.getElementById('start-panel');
+		const startBtn = document.getElementById('startBtn');
+
+		// Virtual low-res buffer (retro feel)
+		const VW = 320, VH = 200; // virtual resolution
+		const buffer = document.createElement('canvas'); buffer.width = VW; buffer.height = VH;
+		const bctx = buffer.getContext('2d'); bctx.imageSmoothingEnabled = false;
+
+		let W=960,H=640;
+		function resize(){
+			const r = wrap.getBoundingClientRect(); W = Math.floor(r.width); H = Math.floor(r.height);
+			canvas.width = W * devicePixelRatio; canvas.height = H * devicePixelRatio;
+			canvas.style.width = W+'px'; canvas.style.height = H+'px';
+			ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+			// main canvas will display scaled buffer, but buffer keeps fixed VWxVH
+		}
+		window.addEventListener('resize', resize); resize();
+
+		// Retro palette and camera
+		const FOCAL = 160; // adjusted for smaller virtual resolution
+		const groundOffset = 36;
+
+		// Player in world coords
+		const player = {x:0,y:16,z:0, speed:3}
+
+		let bullets = [];
+		let enemies = [];
+		let score = 0, lives = 3;
+		let keys = {};
+		let running = false;
+		let lastSpawn=0, spawnInterval=900;
+		let lastTime=0;
+
+		function worldToScreen(p){
+			const scale = FOCAL / (FOCAL + p.z);
+			const cx = VW/2;
+			const cy = VH/2 + groundOffset*0.5;
+			return {x: Math.round(cx + p.x*scale), y: Math.round(cy + p.y*scale + (1-scale)*groundOffset), scale };
+		}
+
+		function spawnEnemy(){
+			const x = Math.round((Math.random()*2-1) * 90);
+			const y = Math.round(-6 + Math.random()*12);
+			const z = 120 + Math.random()*200; // far
+			const size = 6 + Math.floor(Math.random()*10);
+			enemies.push({x,y,z,size,spd:1+Math.random()*1.2});
+		}
+
+		function shoot(){ bullets.push({x:player.x,y:player.y,z:30,spd:14}); }
+
+		function reset(){ bullets = []; enemies = []; score=0; lives=3; scoreEl.textContent=score; livesEl.textContent=lives; lastSpawn=0; running=true; startPanel.style.display='none'; }
+
+		window.addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space'){ e.preventDefault(); if(running) shoot(); }});
+		window.addEventListener('keyup', e=>{ keys[e.code]=false });
+		startBtn.addEventListener('click', ()=>{ reset(); lastTime=performance.now(); requestAnimationFrame(loop); });
+
+		function update(dt){
+			if(keys['ArrowLeft']||keys['KeyA']) player.x -= player.speed;
+			if(keys['ArrowRight']||keys['KeyD']) player.x += player.speed;
+			player.x = Math.max(-140, Math.min(140, player.x));
+
+			for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; b.z -= b.spd * dt/16; if(b.z<=0) bullets.splice(i,1); }
+
+			for(let i=enemies.length-1;i>=0;i--){ const e=enemies[i]; e.z -= e.spd * dt/16; if(e.z <= 8){ enemies.splice(i,1); lives--; livesEl.textContent=lives; if(lives<=0){ running=false; startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">GAME OVER</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Play Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', ()=>{ startPanel.innerHTML=''; startPanel.style.display='none'; reset(); requestAnimationFrame(loop); }); break; } } }
+
+			// collisions
+			for(let bi=bullets.length-1; bi>=0; bi--){ const b=bullets[bi]; for(let ei=enemies.length-1; ei>=0; ei--){ const e=enemies[ei]; const dx=b.x-e.x, dy=b.y-e.y, dz=b.z-e.z; const dist=Math.sqrt(dx*dx+dy*dy+dz*dz); if(dist < e.size*0.9 + 1){ bullets.splice(bi,1); enemies.splice(ei,1); score += 10; scoreEl.textContent=score; break; } } }
+
+			lastSpawn += dt; if(lastSpawn > spawnInterval){ lastSpawn = 0; spawnEnemy(); if(spawnInterval>420) spawnInterval *= 0.985; }
+		}
+
+		function drawSceneToBuffer(){
+			// clear buffer
+			bctx.fillStyle = '#021022'; bctx.fillRect(0,0,VW,VH);
+
+			// ground (retro stripes)
+			bctx.fillStyle = '#061731'; bctx.fillRect(0, VH/2 + groundOffset - 8, VW, VH/2 + 12);
+			for(let i=0;i<10;i++){ bctx.fillStyle = i%2? 'rgba(255,255,255,0.02)':'rgba(0,0,0,0)'; bctx.fillRect(0, VH/2 + groundOffset + i*2, VW, 1); }
+
+			// draw enemies and bullets sorted by z
+			const drawList = [];
+			enemies.forEach(e=>drawList.push({type:'enemy',o:e})); bullets.forEach(b=>drawList.push({type:'bullet',o:b}));
+			drawList.sort((a,b)=> (a.o.z||0) - (b.o.z||0));
+
+			drawList.forEach(item=>{
+				if(item.type==='enemy'){
+					const e = item.o; const p = worldToScreen(e);
+					const w = Math.max(3, Math.floor(e.size * p.scale));
+					const h = Math.max(2, Math.floor(w*0.7));
+					// shadow (pixel)
+					bctx.fillStyle='rgba(0,0,0,0.25)'; bctx.fillRect(p.x - Math.floor(w*1.2), p.y + h, Math.floor(w*2.4), 2);
+					// body (blocky)
+					bctx.fillStyle = '#ff6b6b'; for(let yy=0;yy<h;yy++){ bctx.fillRect(p.x - Math.floor(w/2), p.y - h + yy, w, 1); }
+					// cockpit
+					bctx.fillStyle = '#111'; bctx.fillRect(p.x - Math.floor(w/6) -1, p.y - Math.floor(h*0.7)-1, Math.max(2,Math.floor(w/3))+2, Math.max(1,Math.floor(h/3))+1);
+				} else {
+					const b = item.o; const p = worldToScreen(b); const r = Math.max(1, Math.floor(1.5 * p.scale)); bctx.fillStyle = '#ffd86b'; bctx.fillRect(p.x-r, p.y-r, r*2, r*2);
+				}
+			});
+
+			// draw player
+			const pp = worldToScreen(player);
+			// player shadow
+			bctx.fillStyle='rgba(0,0,0,0.25)'; bctx.fillRect(pp.x-10, pp.y+10, 20, 3);
+			// ship blocky shape
+			bctx.fillStyle='#4ee0a3'; bctx.fillRect(pp.x-6, pp.y-6, 3, 6); bctx.fillRect(pp.x+4, pp.y-6, 3, 6); bctx.fillRect(pp.x-3, pp.y-10, 6, 6);
+			bctx.fillStyle='#062b1b'; bctx.fillRect(pp.x-2, pp.y-3, 4, 3);
+		}
+
+		function renderToScreen(){
+			// scale buffer to main canvas (nearest)
+			ctx.imageSmoothingEnabled = false; ctx.clearRect(0,0,W,H);
+			ctx.drawImage(buffer, 0, 0, VW, VH, 0, 0, W, H);
+		}
+
+		function draw(){ drawSceneToBuffer(); renderToScreen(); }
+
+		function loop(ts){ if(!lastTime) lastTime=ts; const dt = ts-lastTime; lastTime = ts; if(running){ update(dt); draw(); requestAnimationFrame(loop); } }
+
+		for(let i=0;i<4;i++) spawnEnemy(); draw();
+	})();
+	</script>
+</body>
+</html>
