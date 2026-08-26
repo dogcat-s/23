@@ -86,6 +86,49 @@
           if(x < cols-2 && y < rows-2) map[y][x]=1;
         }
       }
+      connectMap();
+    }
+
+    function getReachable(){
+      const reachable = new Set();
+      const queue = [[1,1]];
+      if(map[1][1]===1) map[1][1]=0;
+      while(queue.length){
+        const [x,y] = queue.shift();
+        const key = x + ',' + y;
+        if(reachable.has(key) || map[y][x]===1) continue;
+        reachable.add(key);
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+          const nx=x+dx, ny=y+dy;
+          if(nx>0 && nx<cols-1 && ny>0 && ny<rows-1 && !reachable.has(nx+','+ny)) queue.push([nx,ny]);
+        }
+      }
+      return reachable;
+    }
+
+    function connectMap(){
+      let reachable = getReachable();
+      let disconnected = true;
+      while(disconnected){
+        disconnected = false;
+        for(let y=1;y<rows-1 && !disconnected;y++) for(let x=1;x<cols-1;x++){
+          if(map[y][x]===1 || reachable.has(x+','+y)) continue;
+          // Carve a simple doorway from this pocket toward the nearest reachable tile.
+          let best = null, bestDistance = Infinity;
+          for(const key of reachable){
+            const parts = key.split(',').map(Number);
+            const distance = Math.abs(parts[0]-x) + Math.abs(parts[1]-y);
+            if(distance < bestDistance){ bestDistance=distance; best=parts; }
+          }
+          let cx=x, cy=y;
+          while(cx!==best[0]){ map[cy][cx]=0; cx += cx<best[0] ? 1 : -1; }
+          while(cy!==best[1]){ map[cy][cx]=0; cy += cy<best[1] ? 1 : -1; }
+          map[cy][cx]=0;
+          reachable = getReachable();
+          disconnected = true;
+          break;
+        }
+      }
     }
 
     // Try to load an external sprite sheet `player.png` (2x2 frames: down, up, left, right)
