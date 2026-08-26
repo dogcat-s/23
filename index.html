@@ -10,7 +10,7 @@
     body{background:linear-gradient(180deg,var(--bg1),var(--bg2));display:flex;align-items:center;justify-content:center;color:var(--fg)}
     #game-wrap{position:relative;width:960px;max-width:96vw;height:640px;background:#021025;box-shadow:0 8px 30px rgba(0,0,0,.7);border-radius:8px;overflow:hidden}
     canvas{display:block;width:100%;height:100%;image-rendering:pixelated}
-    .hud{position:absolute;left:8px;top:8px;font-weight:700;letter-spacing:.6px;font-size:14px}
+    .hud{position:absolute;left:8px;top:8px;z-index:5;font-weight:700;letter-spacing:.6px;font-size:14px;background:rgba(3,16,22,.78);padding:7px 9px;border:2px solid rgba(255,255,255,.18);border-radius:4px;text-shadow:1px 1px #000;pointer-events:none}
     .controls{position:absolute;right:8px;top:8px;font-size:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.06));padding:6px 8px;border-radius:6px}
     .center-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
     .panel{pointer-events:auto;background:rgba(0,0,0,0.75);padding:12px 14px;border-radius:6px;color:var(--fg);text-align:center;border:2px solid rgba(255,255,255,0.03)}
@@ -25,7 +25,8 @@
     <div class="scanlines"></div>
     <div class="hud">
       <div>Score: <span id="score">0</span></div>
-      <div style="margin-top:6px">Time: <span id="time">0</span>s &nbsp; Targets: <span id="targets">0</span></div>
+      <div style="margin-top:6px">Hearts: <span id="hearts">♥♥♥</span></div>
+      <div style="margin-top:6px">Time: <span id="time">90</span>s &nbsp; Targets: <span id="targets">0</span></div>
     </div>
     <div class="controls">Move: W/A/S/D &nbsp; Shoot: Space or Click</div>
     <div class="center-msg"><div id="start-panel" class="panel"><div style="font-size:18px;font-weight:800">MAZE TARGET PRACTICE</div><div style="margin-top:8px;font-size:12px">Move with WASD. Face a direction and press Space or Click to shoot. Clear all targets before time runs out.</div><div style="margin-top:12px"><button id="startBtn">Start Round</button></div></div></div>
@@ -38,6 +39,7 @@
     const ctx = canvas.getContext('2d');
     const wrap = document.getElementById('game-wrap');
     const scoreEl = document.getElementById('score');
+    const heartsEl = document.getElementById('hearts');
     const timeEl = document.getElementById('time');
     const targetsEl = document.getElementById('targets');
     const startPanel = document.getElementById('start-panel');
@@ -175,7 +177,10 @@
     let keys = {};
     let bullets = [];
     let targets = [];
-    let score = 0, timeLeft = 0, running=false, lastTime=0;
+    let score = 0, hearts = 3, timeLeft = 0, running=false, lastTime=0;
+    let loopStarted = false;
+
+    function updateHearts(){ heartsEl.textContent = '♥'.repeat(hearts) + '♡'.repeat(3-hearts); }
 
     function placeTargets(n){ targets = []; const free=[]; for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(map[y][x]===0) free.push({x,y}); for(let i=0;i<n && free.length;i++){ const idx=Math.floor(Math.random()*free.length); const p = free.splice(idx,1)[0]; targets.push({ x: p.x*tile + tile/2 -5, y: p.y*tile + tile/2 -5, w:10, h:10, ox: Math.random()*1000 }); } }
 
@@ -210,21 +215,38 @@
     window.addEventListener('keyup', e=>{ keys[e.code]=false; });
     canvas.addEventListener('click', ()=>{ fireBulletDir(player.dir); });
 
-    startBtn.addEventListener('click', ()=>{
+    function startRound(){
       makeRoom(); placeTargets(12);
+      bullets = [];
+      keys = {};
       // place player at center of first free tile
       for(let y=1;y<rows-1;y++){ let found=false; for(let x=1;x<cols-1;x++){ if(map[y][x]===0){ player.x = x*tile + tile/2; player.y = y*tile + tile/2; found=true; break; } } if(found) break; }
-      timeLeft = 90; score = 0; scoreEl.textContent=0; targetsEl.textContent = targets.length; running=true; startPanel.style.display='none'; lastTime = performance.now(); requestAnimationFrame(loop);
-    });
+      timeLeft = 90; score = 0; hearts = 3; scoreEl.textContent=0; updateHearts(); targetsEl.textContent = targets.length; running=true; startPanel.style.display='none'; lastTime = performance.now();
+      if(!loopStarted){ loopStarted = true; requestAnimationFrame(loop); }
+    }
+
+    startBtn.addEventListener('click', startRound);
 
     function update(dt){ // dt ms
       const sp = player.speed * dt/1000; let nx = player.x, ny = player.y; if(keys['KeyA']) nx -= sp; if(keys['KeyD']) nx += sp; if(keys['KeyW']) ny -= sp; if(keys['KeyS']) ny += sp; if(canMove(nx,ny)){ player.x = nx; player.y = ny; }
+      // Touching a target costs one heart; remove it so one target cannot drain all hearts.
+      for(let ti=targets.length-1;ti>=0;ti--){
+        const target = targets[ti];
+        const touching = Math.abs(player.x - (target.x + target.w/2)) < player.collisionRadius + target.w/2 && Math.abs(player.y - (target.y + target.h/2)) < player.collisionRadius + target.h/2;
+        if(touching){
+          targets.splice(ti,1); hearts--; updateHearts(); targetsEl.textContent = targets.length;
+          if(hearts <= 0){
+            running=false; startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">GAME OVER</div><div style="margin-top:6px">You lost all 3 hearts.</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Try Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', startRound);
+            return;
+          }
+        }
+      }
       // bullets
       for(let i=bullets.length-1;i>=0;i--){ const b = bullets[i]; b.x += b.vx*dt/1000; b.y += b.vy*dt/1000; const cx = Math.floor(b.x / tile), cy = Math.floor(b.y / tile); if(cx<0||cx>=cols||cy<0||cy>=rows || map[cy][cx]===1){ bullets.splice(i,1); continue; } // wall
         // check targets
         for(let ti=targets.length-1;ti>=0;ti--){ const t=targets[ti]; const dx = b.x - (t.x + t.w/2), dy = b.y - (t.y + t.h/2); if(Math.hypot(dx,dy) < 10){ targets.splice(ti,1); score+=10; scoreEl.textContent = score; bullets.splice(i,1); spawnTarget(); break; } }
       }
-      if(running){ timeLeft -= dt/1000; if(timeLeft<0) timeLeft=0; timeEl.textContent = Math.ceil(timeLeft); if(timeLeft<=0 && targets.length>0){ running=false; startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">TIME UP</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Try Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', ()=>{ startPanel.innerHTML=''; startPanel.style.display='none'; }); }
+      if(running){ timeLeft -= dt/1000; if(timeLeft<0) timeLeft=0; timeEl.textContent = Math.ceil(timeLeft); if(timeLeft<=0 && targets.length>0){ running=false; startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">TIME UP</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Try Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', startRound); }
       }
     }
 
@@ -254,8 +276,6 @@
       const playerDrawX = Math.floor(player.x - camX - player.w/2), playerDrawY = Math.floor(player.y - camY - player.h/2);
       if(keys['KeyW']) player.dir = 'up'; else if(keys['KeyS']) player.dir = 'down'; else if(keys['KeyA']) player.dir = 'left'; else if(keys['KeyD']) player.dir = 'right';
       drawPlayerSprite(bctx, playerDrawX, playerDrawY, Math.max(player.w, player.h), player.dir);
-      // side gun (smaller)
-      const gx = VW - 48, gy = VH - 44; bctx.fillStyle='#e0b27d'; bctx.fillRect(gx+10, gy+18, 4, 8); bctx.fillStyle='#333'; bctx.fillRect(gx, gy+10, 36, 12); bctx.fillStyle='#666'; bctx.fillRect(gx+5, gy+6, 24, 5);
       // render
       ctx.imageSmoothingEnabled = false; ctx.clearRect(0,0,W,H); ctx.drawImage(buffer,0,0,VW,VH,0,0,W,H);
     }
@@ -263,7 +283,7 @@
     function loop(ts){ if(!lastTime) lastTime = ts; const dt = ts - lastTime; lastTime = ts; if(running) update(dt); draw(); requestAnimationFrame(loop); }
 
     // initial preview
-    makeRoom(); placeTargets(10); score = 0; scoreEl.textContent = 0; targetsEl.textContent = targets.length; draw();
+    makeRoom(); placeTargets(10); score = 0; hearts = 3; scoreEl.textContent = 0; updateHearts(); targetsEl.textContent = targets.length; draw();
   })();
   </script>
 </body>
