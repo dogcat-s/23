@@ -44,6 +44,7 @@
     const targetsEl = document.getElementById('targets');
     const startPanel = document.getElementById('start-panel');
     const startBtn = document.getElementById('startBtn');
+    let audioContext = null;
 
     // virtual buffer
     const VW = 320, VH = 200;
@@ -182,6 +183,27 @@
 
     function updateHearts(){ heartsEl.textContent = '♥'.repeat(hearts) + '♡'.repeat(3-hearts); }
 
+    function playSound(type){
+      if(!audioContext) return;
+      const now = audioContext.currentTime;
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      const settings = {
+        shoot: { frequency: 150, endFrequency: 70, duration: .08, volume: .12, wave: 'square' },
+        hit: { frequency: 620, endFrequency: 280, duration: .14, volume: .14, wave: 'square' },
+        hurt: { frequency: 110, endFrequency: 55, duration: .24, volume: .18, wave: 'sawtooth' },
+        end: { frequency: 330, endFrequency: 110, duration: .45, volume: .16, wave: 'triangle' }
+      }[type];
+      if(!settings) return;
+      oscillator.type = settings.wave;
+      oscillator.frequency.setValueAtTime(settings.frequency, now);
+      oscillator.frequency.exponentialRampToValueAtTime(settings.endFrequency, now + settings.duration);
+      gain.gain.setValueAtTime(settings.volume, now);
+      gain.gain.exponentialRampToValueAtTime(.001, now + settings.duration);
+      oscillator.connect(gain); gain.connect(audioContext.destination);
+      oscillator.start(now); oscillator.stop(now + settings.duration);
+    }
+
     function placeTargets(n){ targets = []; const free=[]; for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(map[y][x]===0) free.push({x,y}); for(let i=0;i<n && free.length;i++){ const idx=Math.floor(Math.random()*free.length); const p = free.splice(idx,1)[0]; targets.push({ x: p.x*tile + tile/2 -5, y: p.y*tile + tile/2 -5, w:10, h:10, ox: Math.random()*1000 }); } }
 
     function spawnTarget(){
@@ -209,13 +231,15 @@
       return true;
     }
 
-    function fireBulletDir(dir){ let vx=0,vy=0,speed=220; if(dir==='up') vy = -speed; else if(dir==='down') vy = speed; else if(dir==='left') vx = -speed; else if(dir==='right') vx = speed; const off = player.sight + 2; let bx = player.x, by = player.y; if(dir==='up') by -= off; else if(dir==='down') by += off; else if(dir==='left') bx -= off; else if(dir==='right') bx += off; bullets.push({x:bx,y:by,vx,vy,r:3}); }
+    function fireBulletDir(dir){ let vx=0,vy=0,speed=220; if(dir==='up') vy = -speed; else if(dir==='down') vy = speed; else if(dir==='left') vx = -speed; else if(dir==='right') vx = speed; const off = player.sight + 2; let bx = player.x, by = player.y; if(dir==='up') by -= off; else if(dir==='down') by += off; else if(dir==='left') bx -= off; else if(dir==='right') bx += off; bullets.push({x:bx,y:by,vx,vy,r:3}); playSound('shoot'); }
 
     window.addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space'){ e.preventDefault(); fireBulletDir(player.dir); } });
     window.addEventListener('keyup', e=>{ keys[e.code]=false; });
     canvas.addEventListener('click', ()=>{ fireBulletDir(player.dir); });
 
     function startRound(){
+      if(!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioContext.state === 'suspended') audioContext.resume();
       makeRoom(); placeTargets(12);
       bullets = [];
       keys = {};
@@ -234,9 +258,9 @@
         const target = targets[ti];
         const touching = Math.abs(player.x - (target.x + target.w/2)) < player.collisionRadius + target.w/2 && Math.abs(player.y - (target.y + target.h/2)) < player.collisionRadius + target.h/2;
         if(touching){
-          targets.splice(ti,1); hearts--; updateHearts(); targetsEl.textContent = targets.length;
+          targets.splice(ti,1); hearts--; updateHearts(); targetsEl.textContent = targets.length; playSound('hurt');
           if(hearts <= 0){
-            running=false; startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">GAME OVER</div><div style="margin-top:6px">You lost all 3 hearts.</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Try Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', startRound);
+            running=false; playSound('end'); startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">GAME OVER</div><div style="margin-top:6px">You lost all 3 hearts.</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Try Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', startRound);
             return;
           }
         }
@@ -244,9 +268,9 @@
       // bullets
       for(let i=bullets.length-1;i>=0;i--){ const b = bullets[i]; b.x += b.vx*dt/1000; b.y += b.vy*dt/1000; const cx = Math.floor(b.x / tile), cy = Math.floor(b.y / tile); if(cx<0||cx>=cols||cy<0||cy>=rows || map[cy][cx]===1){ bullets.splice(i,1); continue; } // wall
         // check targets
-        for(let ti=targets.length-1;ti>=0;ti--){ const t=targets[ti]; const dx = b.x - (t.x + t.w/2), dy = b.y - (t.y + t.h/2); if(Math.hypot(dx,dy) < 10){ targets.splice(ti,1); score+=10; scoreEl.textContent = score; bullets.splice(i,1); spawnTarget(); break; } }
+        for(let ti=targets.length-1;ti>=0;ti--){ const t=targets[ti]; const dx = b.x - (t.x + t.w/2), dy = b.y - (t.y + t.h/2); if(Math.hypot(dx,dy) < 10){ targets.splice(ti,1); score+=10; scoreEl.textContent = score; bullets.splice(i,1); playSound('hit'); spawnTarget(); break; } }
       }
-      if(running){ timeLeft -= dt/1000; if(timeLeft<0) timeLeft=0; timeEl.textContent = Math.ceil(timeLeft); if(timeLeft<=0 && targets.length>0){ running=false; startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">TIME UP</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Try Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', startRound); }
+      if(running){ timeLeft -= dt/1000; if(timeLeft<0) timeLeft=0; timeEl.textContent = Math.ceil(timeLeft); if(timeLeft<=0 && targets.length>0){ running=false; playSound('end'); startPanel.style.display='block'; startPanel.innerHTML = '<div style="font-size:16px;font-weight:800">TIME UP</div><div style="margin-top:6px">Score: '+score+'</div><div style="margin-top:10px"><button id="startBtn2">Try Again</button></div>'; document.getElementById('startBtn2').addEventListener('click', startRound); }
       }
     }
 
