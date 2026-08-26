@@ -170,7 +170,7 @@
 
     function drawTargetSprite(ctx,x,y){ ctx.fillStyle='#ff6b6b'; ctx.fillRect(x,y,10,10); ctx.fillStyle='#111'; ctx.fillRect(x+3,y+3,4,4); }
 
-    const player = { x: VW/2, y: VH/2, sight:4, speed: 80, dir: 'down' };
+    const player = { x: VW/2, y: VH/2, sight:4, collisionRadius:3, speed: 80, dir: 'down' };
     player.w = player.sight * 2; player.h = player.sight * 2;
     let keys = {};
     let bullets = [];
@@ -197,8 +197,8 @@
     const MAP_W = cols * tile, MAP_H = rows * tile;
 
     function canMove(nx,ny){ // check collision using player's bounding box corners
-      const left = nx - player.sight, right = nx + player.sight - 1;
-      const top = ny - player.sight, bottom = ny + player.sight - 1;
+      const left = nx - player.collisionRadius, right = nx + player.collisionRadius - 1;
+      const top = ny - player.collisionRadius, bottom = ny + player.collisionRadius - 1;
       const points = [ [left,top], [right,top], [left,bottom], [right,bottom] ];
       for(const p of points){ const cx = Math.floor(p[0] / tile), cy = Math.floor(p[1] / tile); if(cx<0||cx>=cols||cy<0||cy>=rows) return false; if(map[cy][cx]===1) return false; }
       return true;
